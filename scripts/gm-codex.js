@@ -51,8 +51,36 @@ function codexEntries() {
 }
 
 function getEntryContent(entry) {
-  const page = entry?.pages?.find?.(p => p.type === "text");
-  return page?.text?.content ?? "";
+  const pages = entry?.pages?.contents ?? Array.from(entry?.pages ?? []);
+  return pages
+    .filter(page => page.type === "text")
+    .map(page => page.text?.content ?? "")
+    .join("\n");
+}
+
+function decorateTextImages(html = "", entry, page) {
+  const container = document.createElement("div");
+  container.innerHTML = html;
+
+  for (const image of container.querySelectorAll("img")) {
+    const src = image.getAttribute("src");
+    if (!src) continue;
+
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "gm-codex-image-share";
+    button.dataset.action = "show-image";
+    button.dataset.src = src;
+    button.dataset.title = image.getAttribute("alt") || page?.name || entry?.name || "Immagine";
+    button.dataset.uuid = page?.uuid || entry?.uuid || "";
+    button.innerHTML = '<i class="fa-solid fa-eye"></i> Mostra ai giocatori';
+
+    const anchor = image.closest("a");
+    const target = anchor ?? image;
+    target.insertAdjacentElement("afterend", button);
+  }
+
+  return container.innerHTML;
 }
 
 function isShared(entry) {
@@ -137,6 +165,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     this.section = "overview";
     this.outsideSection = "place";
     this.selectedEntryId = null;
+    this.selectedCityPageId = null;
     this.searchTerm = "";
   }
 
@@ -240,7 +269,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
     const city = cities.find(c => c.id === this.selectedCityId) ?? cities[0];
     const tabs = [
-      ["overview", "Panoramica", "fa-solid fa-book-open"],
+      ["overview", "Pagine città", "fa-solid fa-book-open"],
       ["faction", "Fazioni", "fa-solid fa-flag"],
       ["npc", "PNG", "fa-solid fa-user"],
       ["quest", "Missioni", "fa-solid fa-scroll"]
@@ -269,30 +298,63 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       <div class="gm-codex-section-body">${body}</div>`;
   }
 
+  #renderPage(entry, page) {
+    if (!page) return '<div class="gm-codex-empty-list"><i class="fa-solid fa-file-circle-question"></i><p>Nessuna pagina disponibile.</p></div>';
+
+    const pageTitle = escapeHTML(page.name || "Pagina");
+    const pageLabel = entry.getFlag(MODULE_ID, "kind") === "city" ? "PAGINA DELLA CITTÀ" : "PAGINA DELLA SCHEDA";
+    let content = "";
+
+    if (page.type === "text") {
+      content = `<section class="gm-codex-page gm-codex-readable" data-page-id="${page.id}">${decorateTextImages(page.text?.content || "<p><em>Pagina vuota.</em></p>", entry, page)}</section>`;
+    } else if (page.type === "image" && page.src) {
+      content = `
+        <section class="gm-codex-page image-page" data-page-id="${page.id}">
+          <img src="${escapeHTML(page.src)}" alt="${pageTitle}">
+          <button type="button" class="gm-codex-image-share standalone" data-action="show-image" data-src="${escapeHTML(page.src)}" data-title="${pageTitle}" data-uuid="${escapeHTML(page.uuid || entry.uuid || "")}"><i class="fa-solid fa-eye"></i> Mostra ai giocatori</button>
+        </section>`;
+    } else {
+      content = `<section class="gm-codex-page unsupported" data-page-id="${page.id}"><em>Pagina “${pageTitle}” apribile dal Journal originale.</em></section>`;
+    }
+
+    return `
+      <div class="gm-codex-city-page-head">
+        <div><span class="eyebrow">${pageLabel}</span><h2>${pageTitle}</h2></div>
+      </div>
+      ${content}`;
+  }
+
   #renderPages(entry) {
     const pages = entry.pages?.contents ?? Array.from(entry.pages ?? []);
-    const pageHTML = pages.map(page => {
-      if (page.type === "text") {
-        return `<section class="gm-codex-page gm-codex-readable" data-page-id="${page.id}">${page.text?.content || "<p><em>Pagina vuota.</em></p>"}</section>`;
-      }
-      if (page.type === "image" && page.src) {
-        return `<section class="gm-codex-page image-page" data-page-id="${page.id}"><img src="${escapeHTML(page.src)}" alt="${escapeHTML(page.name || entry.name)}"></section>`;
-      }
-      return `<section class="gm-codex-page unsupported" data-page-id="${page.id}"><em>Pagina “${escapeHTML(page.name || "")}" apribile dal Journal originale.</em></section>`;
-    }).join("");
-
-    return `<div class="gm-codex-pages gm-codex-pages-scroll">${pageHTML || '<p><em>Nessuna pagina.</em></p>'}</div>`;
+    return `<div class="gm-codex-pages gm-codex-pages-scroll">${pages.map(page => this.#renderPage(entry, page)).join("") || '<p><em>Nessuna pagina.</em></p>'}</div>`;
   }
 
   #renderCityOverview(city) {
+    const pages = city.pages?.contents ?? Array.from(city.pages ?? []);
+    if (this.selectedCityPageId && !pages.some(page => page.id === this.selectedCityPageId)) this.selectedCityPageId = null;
+    const selectedPage = pages.find(page => page.id === this.selectedCityPageId) ?? pages[0] ?? null;
+    if (selectedPage) this.selectedCityPageId = selectedPage.id;
+
+    const pageNav = pages.length
+      ? pages.map(page => {
+          const icon = page.type === "image" ? "fa-solid fa-image" : page.type === "text" ? "fa-solid fa-file-lines" : "fa-solid fa-file";
+          const active = selectedPage?.id === page.id ? "active" : "";
+          return `<button type="button" class="gm-codex-city-page-tab ${active}" data-action="select-city-page" data-page-id="${page.id}"><i class="${icon}"></i><span>${escapeHTML(page.name || "Pagina")}</span></button>`;
+        }).join("")
+      : '<div class="gm-codex-empty-mini">Nessuna pagina nel Journal della città.</div>';
+
     return `
       <div class="gm-codex-detail-actions compact">
         <button type="button" class="gm-codex-primary" data-action="open-journal" data-id="${city.id}"><i class="fa-solid fa-pen-to-square"></i> Modifica</button>
-        <button type="button" class="gm-codex-secondary" data-action="show" data-id="${city.id}"><i class="fa-solid fa-eye"></i> Mostra ora</button>
+        <button type="button" class="gm-codex-secondary" data-action="show" data-id="${city.id}"><i class="fa-solid fa-eye"></i> Mostra città</button>
         <button type="button" class="gm-codex-secondary" data-action="share" data-id="${city.id}"><i class="fa-solid ${isShared(city) ? "fa-unlock" : "fa-lock"}"></i> ${isShared(city) ? "Visibile al gruppo" : "Solo GM"}</button>
         <button type="button" class="gm-codex-danger" data-action="delete" data-id="${city.id}"><i class="fa-solid fa-trash"></i> Elimina</button>
       </div>
-      ${this.#renderPages(city)}`;
+      <div class="gm-codex-city-pages-index">
+        <div class="gm-codex-city-pages-label"><i class="fa-solid fa-layer-group"></i> Pagine della città</div>
+        <nav class="gm-codex-city-page-tabs">${pageNav}</nav>
+      </div>
+      <div class="gm-codex-selected-city-page">${this.#renderPage(city, selectedPage)}</div>`;
   }
 
   #buildList(items, kind, cityId = null) {
@@ -401,11 +463,15 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         this.selectedCityId = target.dataset.id;
         this.section = "overview";
         this.selectedEntryId = null;
+        this.selectedCityPageId = null;
         this.searchTerm = "";
         return this.render();
       case "section":
         this.section = target.dataset.section;
         this.selectedEntryId = null;
+        return this.render();
+      case "select-city-page":
+        this.selectedCityPageId = target.dataset.pageId || null;
         return this.render();
       case "outside":
         this.section = "outside";
@@ -426,6 +492,8 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         return this.#openJournal(target.dataset.id);
       case "show":
         return this.#showEntry(target.dataset.id);
+      case "show-image":
+        return this.#showImage(target.dataset.src, target.dataset.title, target.dataset.uuid);
       case "share":
         return this.#toggleShare(target.dataset.id);
       case "delete":
@@ -450,6 +518,19 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     if (!entry) return;
     await entry.show(true);
     ui.notifications.info(`“${entry.name}” mostrato ai giocatori.`);
+  }
+
+  async #showImage(src, title = "Immagine", uuid = "") {
+    if (!src) return;
+    const ImagePopout = foundry.applications.apps.ImagePopout;
+    const popout = new ImagePopout({
+      src,
+      uuid: uuid || undefined,
+      window: { title: title || "Immagine" }
+    });
+    await popout.render(true);
+    popout.shareImage();
+    ui.notifications.info(`Immagine “${title || "Immagine"}” mostrata ai giocatori.`);
   }
 
   async #toggleShare(id) {
@@ -500,7 +581,10 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     await entry.delete();
 
     if (this.selectedEntryId === entry.id) this.selectedEntryId = null;
-    if (kind === "city" && this.selectedCityId === entry.id) this.selectedCityId = null;
+    if (kind === "city" && this.selectedCityId === entry.id) {
+      this.selectedCityId = null;
+      this.selectedCityPageId = null;
+    }
 
     ui.notifications.info(`“${entry.name}” eliminato dal GM Codex.`);
     this.render();
@@ -550,6 +634,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
     if (kind === "city") {
       this.selectedCityId = created.id;
+      this.selectedCityPageId = null;
       this.section = "overview";
     } else if (kind === "place" || kind === "encounter") {
       this.section = "outside";
@@ -639,6 +724,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     await encounter.setFlag(MODULE_ID, "demo", true);
 
     this.selectedCityId = city.id;
+    this.selectedCityPageId = null;
     this.section = "overview";
     this.selectedEntryId = null;
     this.searchTerm = "";
