@@ -69,11 +69,11 @@ function decorateTextImages(html = "", entry, page) {
     const button = document.createElement("button");
     button.type = "button";
     button.className = "gm-codex-image-share";
-    button.dataset.action = "show-image";
+    button.dataset.action = "open-image";
     button.dataset.src = src;
     button.dataset.title = image.getAttribute("alt") || page?.name || entry?.name || "Immagine";
     button.dataset.uuid = page?.uuid || entry?.uuid || "";
-    button.innerHTML = '<i class="fa-solid fa-eye"></i> Mostra ai giocatori';
+    button.innerHTML = '<i class="fa-solid fa-image"></i> Apri immagine';
 
     const anchor = image.closest("a");
     const target = anchor ?? image;
@@ -311,7 +311,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       content = `
         <section class="gm-codex-page image-page" data-page-id="${page.id}">
           <img src="${escapeHTML(page.src)}" alt="${pageTitle}">
-          <button type="button" class="gm-codex-image-share standalone" data-action="show-image" data-src="${escapeHTML(page.src)}" data-title="${pageTitle}" data-uuid="${escapeHTML(page.uuid || entry.uuid || "")}"><i class="fa-solid fa-eye"></i> Mostra ai giocatori</button>
+          <button type="button" class="gm-codex-image-share standalone" data-action="open-image" data-src="${escapeHTML(page.src)}" data-title="${pageTitle}" data-uuid="${escapeHTML(page.uuid || entry.uuid || "")}"><i class="fa-solid fa-image"></i> Apri immagine</button>
         </section>`;
     } else {
       content = `<section class="gm-codex-page unsupported" data-page-id="${page.id}"><em>Pagina “${pageTitle}” apribile dal Journal originale.</em></section>`;
@@ -492,8 +492,8 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         return this.#openJournal(target.dataset.id);
       case "show":
         return this.#showEntry(target.dataset.id);
-      case "show-image":
-        return this.#showImage(target.dataset.src, target.dataset.title, target.dataset.uuid);
+      case "open-image":
+        return this.#openImage(target.dataset.src, target.dataset.title, target.dataset.uuid);
       case "share":
         return this.#toggleShare(target.dataset.id);
       case "delete":
@@ -520,7 +520,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     ui.notifications.info(`“${entry.name}” mostrato ai giocatori.`);
   }
 
-  async #showImage(src, title = "Immagine", uuid = "") {
+  async #openImage(src, title = "Immagine", uuid = "") {
     if (!src) return;
     const ImagePopout = foundry.applications.apps.ImagePopout;
     const popout = new ImagePopout({
@@ -529,8 +529,6 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       window: { title: title || "Immagine" }
     });
     await popout.render(true);
-    popout.shareImage();
-    ui.notifications.info(`Immagine “${title || "Immagine"}” mostrata ai giocatori.`);
   }
 
   async #toggleShare(id) {
