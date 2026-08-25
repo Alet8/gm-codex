@@ -1,1 +1,62 @@
+name: Publish Foundry Module
 
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Versione da pubblicare (es. 0.2.0)"
+        required: true
+        default: "0.2.0"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Build Foundry package
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          REPO="${{ github.repository }}"
+
+          rm -rf dist
+          mkdir -p dist/gm-codex
+
+          rsync -a \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude 'dist' \
+            ./ dist/gm-codex/
+
+          jq \
+            --arg version "$VERSION" \
+            --arg url "https://github.com/$REPO" \
+            --arg manifest "https://github.com/$REPO/releases/latest/download/module.json" \
+            --arg download "https://github.com/$REPO/releases/download/v$VERSION/gm-codex.zip" \
+            '.version = $version | .url = $url | .manifest = $manifest | .download = $download' \
+            dist/gm-codex/module.json > dist/module.json
+
+          cp dist/module.json dist/gm-codex/module.json
+
+          (cd dist && zip -r gm-codex.zip gm-codex)
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ inputs.version }}"
+          VERSION="${VERSION#v}"
+          gh release create "v$VERSION" \
+            dist/gm-codex.zip \
+            dist/module.json \
+            --title "GM Codex v$VERSION" \
+            --generate-notes
