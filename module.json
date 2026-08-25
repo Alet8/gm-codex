@@ -1,0 +1,22 @@
+{
+  "id": "gm-codex",
+  "title": "GM Codex",
+  "description": "Un manuale del GM semplice e lineare basato sui Journal di Foundry VTT: città, fazioni, PNG, missioni, luoghi e incontri.",
+  "version": "0.2.0",
+  "authors": [
+    {
+      "name": "GM Codex"
+    }
+  ],
+  "compatibility": {
+    "minimum": "13",
+    "verified": "13",
+    "maximum": "13"
+  },
+  "esmodules": [
+    "scripts/gm-codex.js"
+  ],
+  "styles": [
+    "styles/gm-codex.css"
+  ]
+}
