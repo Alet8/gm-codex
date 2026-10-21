@@ -4,9 +4,9 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Versione da pubblicare (es. 0.2.0)"
+        description: "Versione da pubblicare (es. 0.4.3)"
         required: true
-        default: "0.2.0"
+        default: "0.4.3"
 
 permissions:
   contents: write
@@ -16,7 +16,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Build Foundry package
         shell: bash
@@ -27,13 +27,13 @@ jobs:
           REPO="${{ github.repository }}"
 
           rm -rf dist
-          mkdir -p dist/gm-codex
+          mkdir -p dist/package
 
           rsync -a \
             --exclude '.git' \
             --exclude '.github' \
             --exclude 'dist' \
-            ./ dist/gm-codex/
+            ./ dist/package/
 
           jq \
             --arg version "$VERSION" \
@@ -41,11 +41,12 @@ jobs:
             --arg manifest "https://github.com/$REPO/releases/latest/download/module.json" \
             --arg download "https://github.com/$REPO/releases/download/v$VERSION/gm-codex.zip" \
             '.version = $version | .url = $url | .manifest = $manifest | .download = $download' \
-            dist/gm-codex/module.json > dist/module.json
+            dist/package/module.json > dist/module.json
 
-          cp dist/module.json dist/gm-codex/module.json
+          cp dist/module.json dist/package/module.json
 
-          (cd dist && zip -r gm-codex.zip gm-codex)
+          # Foundry expects module.json at the root of the ZIP.
+          (cd dist/package && zip -r ../gm-codex.zip .)
 
       - name: Publish GitHub Release
         env:
