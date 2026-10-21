@@ -105,6 +105,33 @@ function decorateTextImages(html = "", entry, page) {
   return container.innerHTML;
 }
 
+function prepareTextPage(html = "", entry, page) {
+  const container = document.createElement("div");
+  container.innerHTML = decorateTextImages(html, entry, page);
+
+  const outline = [];
+  const pageName = String(page?.name || "").trim().toLocaleLowerCase("it");
+
+  for (const [index, heading] of [...container.querySelectorAll("h1, h2, h3, h4")].entries()) {
+    const label = (heading.textContent || "").replace(/\s+/g, " ").trim();
+    if (!label) continue;
+
+    // Evita di ripetere nell'indice il titolo della pagina quando compare come primo heading.
+    if (!outline.length && pageName && label.toLocaleLowerCase("it") === pageName) continue;
+
+    const id = `gm-codex-heading-${page?.id || "page"}-${index}`;
+    heading.id = id;
+    heading.classList.add("gm-codex-content-heading");
+    outline.push({
+      id,
+      label,
+      level: Number(heading.tagName.slice(1)) || 2
+    });
+  }
+
+  return { html: container.innerHTML, outline };
+}
+
 async function ensureRootFolder() {
   let folder = game.folders.find(f => f.type === "JournalEntry" && f.name === ROOT_FOLDER_NAME && !f.folder);
   if (!folder) {
@@ -764,11 +791,30 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     return "";
   }
 
+  _renderPageOutline(outline = []) {
+    if (outline.length < 2) return "";
+
+    const minLevel = Math.min(...outline.map(item => item.level));
+    return `
+      <nav class="gm-codex-page-index" aria-label="Indice della pagina">
+        <div class="gm-codex-page-index-label"><i class="fa-solid fa-list"></i><span>Indice pagina</span></div>
+        <div class="gm-codex-page-index-items">
+          ${outline.map(item => `
+            <button type="button" class="gm-codex-page-index-link level-${Math.max(0, item.level - minLevel)}" data-action="jump-heading" data-heading-id="${escapeHTML(item.id)}" title="Vai a ${escapeHTML(item.label)}">
+              ${escapeHTML(item.label)}
+            </button>`).join("")}
+        </div>
+      </nav>`;
+  }
+
   _renderPageBody(entry, page) {
     if (!page) return '<div class="gm-codex-empty-list"><i class="fa-solid fa-file-circle-question"></i><p>Pagina non disponibile.</p></div>';
 
     if (page.type === "text") {
-      return `<section class="gm-codex-page gm-codex-readable">${decorateTextImages(page.text?.content || "<p><em>Pagina vuota.</em></p>", entry, page)}</section>`;
+      const prepared = prepareTextPage(page.text?.content || "<p><em>Pagina vuota.</em></p>", entry, page);
+      return `
+        ${this._renderPageOutline(prepared.outline)}
+        <section class="gm-codex-page gm-codex-readable">${prepared.html}</section>`;
     }
     if (page.type === "image" && page.src) {
       return `
@@ -1136,6 +1182,16 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       case "select-entry-page":
         this.selectedEntryPageId = target.dataset.pageId || null;
         return this.render({ force: true });
+
+      case "jump-heading": {
+        const headingId = target.dataset.headingId;
+        const heading = headingId ? this.element?.querySelector(`#${headingId}`) : null;
+        if (!heading) return;
+        heading.scrollIntoView({ behavior: "smooth", block: "start" });
+        heading.classList.add("gm-codex-heading-flash");
+        window.setTimeout(() => heading.classList.remove("gm-codex-heading-flash"), 1200);
+        return;
+      }
 
       case "quick-create":
         return this._promptQuickCreate(target.dataset.cityId);
