@@ -430,6 +430,10 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     this.selectedEntryPageId = null;
     this.searchTerm = "";
     this.collapsedGroups = new Set();
+    this.expandedPageOutlines = new Set();
+    this.selectedHeadingId = null;
+    this._pendingHeadingId = null;
+    this.treeWidth = 300;
     this._dragNodeId = null;
   }
 
@@ -448,6 +452,19 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     await super._onRender(context, options);
     this._bindListeners();
     this._bindDragDrop();
+    this._bindWorkspaceResize();
+
+    if (this._pendingHeadingId) {
+      const headingId = this._pendingHeadingId;
+      this._pendingHeadingId = null;
+      requestAnimationFrame(() => {
+        const heading = this.element?.querySelector(`#${CSS.escape(headingId)}`);
+        if (!heading) return;
+        heading.scrollIntoView({ behavior: "smooth", block: "start" });
+        heading.classList.add("gm-codex-heading-flash");
+        window.setTimeout(() => heading.classList.remove("gm-codex-heading-flash"), 1200);
+      });
+    }
 
     if (this.searchTerm) {
       const search = this.element?.querySelector('[data-action="search"]');
@@ -595,7 +612,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
           </div>
         </div>
 
-        <div class="gm-codex-city-workspace">
+        <div class="gm-codex-city-workspace" style="--gm-codex-tree-width:${Math.round(this.treeWidth)}px">
           <aside class="gm-codex-tree-panel">
             <div class="gm-codex-tree-head">
               <button type="button" class="gm-codex-tree-home ${!this.selectedTreeNodeId ? "active" : ""}" data-action="city-home">
@@ -608,6 +625,8 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
               <div class="gm-codex-tree-root-drop" data-tree-root-drop="true"><i class="fa-solid fa-turn-down"></i> Trascina qui per portare alla radice</div>
             </div>
           </aside>
+
+          <div class="gm-codex-workspace-splitter" data-workspace-splitter title="Trascina per ridimensionare l'albero"></div>
 
           <section class="gm-codex-reader">
             ${this._renderSelectedCityNode(city, entries, tree)}
@@ -649,13 +668,23 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         if (!page) return "";
         const icon = page.type === "image" ? "fa-solid fa-image" : "fa-regular fa-file-lines";
         const active = this.selectedTreeNodeId === node.id ? "active" : "";
+        const outline = page.type === "text"
+          ? prepareTextPage(page.text?.content || "", city, page).outline
+          : [];
+        const outlineOpen = outline.length && (this.expandedPageOutlines.has(node.id) || this.selectedTreeNodeId === node.id);
         return `
-          <div class="gm-codex-tree-row leaf ${active}" draggable="true" data-tree-node="${node.id}" data-node-type="page" style="--depth:${depth}">
-            <span class="gm-codex-tree-spacer"></span>
-            <button type="button" class="gm-codex-tree-label" data-action="select-tree-node" data-id="${node.id}">
-              <i class="${icon}"></i><span>${escapeHTML(page.name || "Pagina")}</span>
-            </button>
-            <span class="gm-codex-tree-drag"><i class="fa-solid fa-grip-vertical"></i></span>
+          <div class="gm-codex-tree-branch page-branch">
+            <div class="gm-codex-tree-row leaf ${active}" draggable="true" data-tree-node="${node.id}" data-node-type="page" style="--depth:${depth}">
+              ${outline.length
+                ? `<button type="button" class="gm-codex-tree-toggle" data-action="toggle-page-outline" data-id="${node.id}" title="${outlineOpen ? "Nascondi sottosezioni" : "Mostra sottosezioni"}"><i class="fa-solid fa-chevron-${outlineOpen ? "down" : "right"}"></i></button>`
+                : '<span class="gm-codex-tree-spacer"></span>'}
+              <button type="button" class="gm-codex-tree-label" data-action="select-tree-node" data-id="${node.id}">
+                <i class="${icon}"></i><span>${escapeHTML(page.name || "Pagina")}</span>
+                ${outline.length ? `<small>${outline.length}</small>` : ""}
+              </button>
+              <span class="gm-codex-tree-drag"><i class="fa-solid fa-grip-vertical"></i></span>
+            </div>
+            ${outlineOpen ? this._renderOutlineTree(node.id, outline, depth + 1) : ""}
           </div>`;
       }
 
@@ -676,6 +705,24 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
       return "";
     }).join("");
+  }
+
+  _renderOutlineTree(pageNodeId, outline, depth = 0) {
+    if (!outline?.length) return "";
+    const minLevel = Math.min(...outline.map(item => item.level));
+    return `
+      <div class="gm-codex-tree-page-outline">
+        ${outline.map(item => {
+          const levelOffset = Math.max(0, item.level - minLevel);
+          const active = this.selectedTreeNodeId === pageNodeId && this.selectedHeadingId === item.id ? "active" : "";
+          return `
+            <button type="button" class="gm-codex-tree-outline-item ${active}" data-action="select-page-heading" data-id="${pageNodeId}" data-heading-id="${escapeHTML(item.id)}" style="--depth:${depth + levelOffset}">
+              <span class="gm-codex-tree-outline-guide"></span>
+              <i class="fa-solid fa-bookmark"></i>
+              <span>${escapeHTML(item.label)}</span>
+            </button>`;
+        }).join("")}
+      </div>`;
   }
 
   _renderSelectedCityNode(city, entries, tree) {
@@ -812,9 +859,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
     if (page.type === "text") {
       const prepared = prepareTextPage(page.text?.content || "<p><em>Pagina vuota.</em></p>", entry, page);
-      return `
-        ${this._renderPageOutline(prepared.outline)}
-        <section class="gm-codex-page gm-codex-readable">${prepared.html}</section>`;
+      return `<section class="gm-codex-page gm-codex-readable">${prepared.html}</section>`;
     }
     if (page.type === "image" && page.src) {
       return `
@@ -1132,6 +1177,36 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     }
   }
 
+  _bindWorkspaceResize() {
+    const root = this.element;
+    const splitter = root?.querySelector("[data-workspace-splitter]");
+    const workspace = splitter?.closest(".gm-codex-city-workspace");
+    if (!splitter || !workspace) return;
+
+    splitter.addEventListener("pointerdown", event => {
+      event.preventDefault();
+      splitter.setPointerCapture?.(event.pointerId);
+      workspace.classList.add("resizing");
+
+      const onMove = moveEvent => {
+        const rect = workspace.getBoundingClientRect();
+        const maxWidth = Math.max(260, Math.min(520, rect.width - 360));
+        const width = Math.max(220, Math.min(maxWidth, moveEvent.clientX - rect.left));
+        this.treeWidth = width;
+        workspace.style.setProperty("--gm-codex-tree-width", `${Math.round(width)}px`);
+      };
+
+      const onUp = () => {
+        workspace.classList.remove("resizing");
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+      };
+
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp, { once: true });
+    });
+  }
+
   async _handleAction(event) {
     const target = event.currentTarget;
     const action = target.dataset.action;
@@ -1142,20 +1217,38 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         this.section = "city";
         this.selectedTreeNodeId = null;
         this.selectedEntryPageId = null;
+        this.selectedHeadingId = null;
         this.searchTerm = "";
         return this.render({ force: true });
 
       case "city-home":
         this.selectedTreeNodeId = null;
+        this.selectedHeadingId = null;
         return this.render({ force: true });
 
       case "select-tree-node":
         this.selectedTreeNodeId = target.dataset.id;
         this.selectedEntryPageId = null;
+        this.selectedHeadingId = null;
+        if (target.closest('[data-node-type="page"]')) this.expandedPageOutlines.add(target.dataset.id);
+        return this.render({ force: true });
+
+      case "toggle-page-outline":
+        if (this.expandedPageOutlines.has(target.dataset.id)) this.expandedPageOutlines.delete(target.dataset.id);
+        else this.expandedPageOutlines.add(target.dataset.id);
+        return this.render({ force: true });
+
+      case "select-page-heading":
+        this.selectedTreeNodeId = target.dataset.id;
+        this.selectedEntryPageId = null;
+        this.selectedHeadingId = target.dataset.headingId || null;
+        this.expandedPageOutlines.add(target.dataset.id);
+        this._pendingHeadingId = this.selectedHeadingId;
         return this.render({ force: true });
 
       case "open-search-result":
         this.selectedTreeNodeId = target.dataset.id;
+        this.selectedHeadingId = null;
         this.searchTerm = "";
         return this.render({ force: true });
 

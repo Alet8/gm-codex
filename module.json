@@ -1,8 +1,8 @@
 {
   "id": "gm-codex",
   "title": "GM Codex",
-  "description": "Manuale del GM ad albero integrato con i Journal di Foundry VTT, con indice rapido automatico dei capitoli interni alle pagine.",
-  "version": "0.5.2",
+  "description": "Manuale del GM ad albero integrato con i Journal di Foundry VTT, con sottosezioni dei contenuti direttamente nell’albero e pannelli ridimensionabili.",
+  "version": "0.5.3",
   "authors": [
     {
       "name": "GM Codex"
