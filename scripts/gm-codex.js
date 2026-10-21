@@ -166,16 +166,29 @@ async function createCodexEntry({ name, kind, cityId = null, factionId = null, s
 /*                                  Tree data                                 */
 /* -------------------------------------------------------------------------- */
 
-function makeGroup(title, icon = null, children = []) {
-  return { id: newId(), type: "group", title, icon: icon || iconForGroup(title), children };
+function stableKey(value = "") {
+  return String(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLocaleLowerCase("it")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "") || "group";
+}
+
+function makeGroup(title, icon = null, children = [], id = null) {
+  return { id: id || newId(), type: "group", title, icon: icon || iconForGroup(title), children };
+}
+
+function makeDefaultGroup(title, icon = null) {
+  return makeGroup(title, icon, [], `builtin-${stableKey(title)}`);
 }
 
 function makePageNode(pageId) {
-  return { id: newId(), type: "page", pageId };
+  return { id: `page-${pageId}`, type: "page", pageId };
 }
 
 function makeEntryNode(entryId) {
-  return { id: newId(), type: "entry", entryId };
+  return { id: `entry-${entryId}`, type: "entry", entryId };
 }
 
 function iconForGroup(title = "") {
@@ -258,7 +271,7 @@ function ensureTopGroup(tree, title) {
   let group = tree.find(n => n.type === "group" && n.title === title);
   if (!group) {
     const def = DEFAULT_GROUPS.find(([name]) => name === title);
-    group = makeGroup(title, def?.[1]);
+    group = def ? makeDefaultGroup(title, def?.[1]) : makeGroup(title, def?.[1]);
     tree.push(group);
   }
   group.children ??= [];
@@ -267,7 +280,7 @@ function ensureTopGroup(tree, title) {
 
 function normalizeTree(city, allEntries) {
   const stored = city.getFlag(MODULE_ID, TREE_FLAG);
-  let tree = Array.isArray(stored) ? foundry.utils.deepClone(stored) : DEFAULT_GROUPS.map(([title, icon]) => makeGroup(title, icon));
+  let tree = Array.isArray(stored) ? foundry.utils.deepClone(stored) : DEFAULT_GROUPS.map(([title, icon]) => makeDefaultGroup(title, icon));
 
   const pageIds = new Set(getPages(city).map(p => p.id));
   const linkedEntries = allEntries.filter(e => e.id !== city.id && e.getFlag(MODULE_ID, "cityId") === city.id);
@@ -1084,26 +1097,26 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         this.selectedTreeNodeId = null;
         this.selectedEntryPageId = null;
         this.searchTerm = "";
-        return this.render();
+        return this.render({ force: true });
 
       case "city-home":
         this.selectedTreeNodeId = null;
-        return this.render();
+        return this.render({ force: true });
 
       case "select-tree-node":
         this.selectedTreeNodeId = target.dataset.id;
         this.selectedEntryPageId = null;
-        return this.render();
+        return this.render({ force: true });
 
       case "open-search-result":
         this.selectedTreeNodeId = target.dataset.id;
         this.searchTerm = "";
-        return this.render();
+        return this.render({ force: true });
 
       case "toggle-group":
         if (this.collapsedGroups.has(target.dataset.id)) this.collapsedGroups.delete(target.dataset.id);
         else this.collapsedGroups.add(target.dataset.id);
-        return this.render();
+        return this.render({ force: true });
 
       case "add-group":
         return this._promptAddGroup(target.dataset.parentId || null);
@@ -1122,7 +1135,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
       case "select-entry-page":
         this.selectedEntryPageId = target.dataset.pageId || null;
-        return this.render();
+        return this.render({ force: true });
 
       case "quick-create":
         return this._promptQuickCreate(target.dataset.cityId);
@@ -1131,26 +1144,26 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         this.section = "journals";
         this.selectedEntryId = null;
         this.searchTerm = "";
-        return this.render();
+        return this.render({ force: true });
 
       case "outside":
         this.section = "outside";
         this.outsideSection = target.dataset.kind;
         this.selectedEntryId = null;
         this.searchTerm = "";
-        return this.render();
+        return this.render({ force: true });
 
       case "outside-detail":
         this.selectedEntryId = target.dataset.id;
-        return this.render();
+        return this.render({ force: true });
 
       case "outside-back":
         this.selectedEntryId = null;
-        return this.render();
+        return this.render({ force: true });
 
       case "clear-search":
         this.searchTerm = "";
-        return this.render();
+        return this.render({ force: true });
 
       case "open-journal":
         return this._openJournal(target.dataset.id);
@@ -1211,7 +1224,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     const moved = moveTreeNode(tree, sourceId, targetId, mode);
     await this._saveTree(city, moved);
     this.selectedTreeNodeId = sourceId;
-    this.render();
+    this.render({ force: true });
   }
 
   async _promptAddGroup(parentId = null) {
@@ -1243,7 +1256,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
     await this._saveTree(city, tree);
     this.selectedTreeNodeId = group.id;
-    this.render();
+    this.render({ force: true });
   }
 
   async _promptRenameGroup(groupId) {
@@ -1268,7 +1281,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     group.title = title;
     group.icon = iconForGroup(title);
     await this._saveTree(city, tree);
-    this.render();
+    this.render({ force: true });
   }
 
   async _deleteGroup(groupId) {
@@ -1292,7 +1305,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     info.array.splice(info.index, 1, ...(group.children ?? []));
     await this._saveTree(city, tree);
     if (this.selectedTreeNodeId === groupId) this.selectedTreeNodeId = null;
-    this.render();
+    this.render({ force: true });
   }
 
   _openJournal(id) {
@@ -1351,7 +1364,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     }
 
     ui.notifications.info(`Pagina “${name}” creata.`);
-    this.render();
+    this.render({ force: true });
   }
 
   async _deleteCityPage(entryId, pageId) {
@@ -1371,7 +1384,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
     await entry.deleteEmbeddedDocuments("JournalEntryPage", [page.id]);
     this.selectedTreeNodeId = null;
-    this.render();
+    this.render({ force: true });
   }
 
   async _promptQuickCreate(cityId) {
@@ -1427,7 +1440,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     });
     ui.notifications.info(`Journal “${name}” creato.`);
     entry.sheet?.render(true);
-    this.render();
+    this.render({ force: true });
   }
 
   async _promptImportJournal(id) {
@@ -1490,7 +1503,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       this.section = "city";
       this.searchTerm = "";
     }
-    this.render();
+    this.render({ force: true });
   }
 
   async _clearCodexFlags(entry) {
@@ -1528,7 +1541,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     await this._clearCodexFlags(entry);
     if (this.selectedCityId === entry.id) this.selectedCityId = null;
     this.section = "journals";
-    this.render();
+    this.render({ force: true });
   }
 
   async _deleteFoundryJournal(id) {
@@ -1548,7 +1561,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
     await entry.delete();
     ui.notifications.info(`Journal “${entry.name}” eliminato.`);
-    this.render();
+    this.render({ force: true });
   }
 
   async _deleteEntry(id) {
@@ -1590,7 +1603,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     this.selectedEntryId = null;
 
     ui.notifications.info(`“${entry.name}” eliminato.`);
-    this.render();
+    this.render({ force: true });
   }
 
   async _showEntry(id) {
@@ -1620,7 +1633,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       : CONST.DOCUMENT_OWNERSHIP_LEVELS.OBSERVER;
     await entry.update({ ownership });
     ui.notifications.info(isShared(entry) ? `“${entry.name}” è ora visibile al gruppo.` : `“${entry.name}” è tornato privato per il GM.`);
-    this.render();
+    this.render({ force: true });
   }
 
   async _promptAdd(kind, cityId) {
@@ -1680,7 +1693,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       if (cityId) this.selectedCityId = cityId;
     }
 
-    this.render();
+    this.render({ force: true });
   }
 
   async _changeQuestStatus(id) {
@@ -1700,7 +1713,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
     if (!status) return;
     await entry.setFlag(MODULE_ID, "status", status);
-    this.render();
+    this.render({ force: true });
   }
 
   openCity(cityId) {

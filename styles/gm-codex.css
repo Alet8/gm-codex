@@ -974,3 +974,29 @@
   .gm-codex-journal-row { align-items: flex-start; flex-direction: column; }
   .gm-codex-journal-actions { justify-content: flex-start; }
 }
+
+/* v0.5.1 - navigation and home-card alignment fixes */
+.gm-codex-home-card,
+.gm-codex-chapter-card {
+  min-height: 62px !important;
+  height: auto !important;
+  line-height: 1.15 !important;
+  align-content: center;
+}
+
+.gm-codex-home-card > div:not(.gm-codex-home-card-icon),
+.gm-codex-chapter-card > div {
+  justify-content: center;
+}
+
+.gm-codex-home-card strong,
+.gm-codex-home-card span,
+.gm-codex-chapter-card strong,
+.gm-codex-chapter-card span {
+  line-height: 1.2;
+}
+
+.gm-codex-tree-label {
+  height: auto !important;
+  min-height: 30px;
+}
