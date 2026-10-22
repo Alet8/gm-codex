@@ -1256,3 +1256,143 @@
     grid-template-columns: minmax(210px, var(--gm-codex-tree-width, 260px)) 7px minmax(0, 1fr) !important;
   }
 }
+
+
+/* v0.5.5 - Trama principale, categorie e galleria immagini */
+.gm-codex-tree-primary-links {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.gm-codex-tree-primary-links .gm-codex-tree-home {
+  width: 100%;
+  min-height: 32px;
+}
+
+.gm-codex-gallery-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.gm-codex-gallery-card {
+  min-width: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 9px;
+  background: rgba(255,255,255,.035);
+}
+
+.gm-codex-gallery-thumb {
+  width: 100%;
+  height: 150px !important;
+  min-height: 150px;
+  display: block;
+  padding: 0;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background: rgba(0,0,0,.22);
+  cursor: pointer;
+}
+
+.gm-codex-gallery-thumb img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
+  transition: transform .15s ease, opacity .15s ease;
+}
+
+.gm-codex-gallery-thumb:hover img {
+  transform: scale(1.025);
+  opacity: .92;
+}
+
+.gm-codex-gallery-meta {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+  padding: 10px 11px 7px;
+}
+
+.gm-codex-gallery-meta strong,
+.gm-codex-gallery-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-codex-gallery-meta strong {
+  font-size: 12px;
+  line-height: 1.25;
+}
+
+.gm-codex-gallery-meta span {
+  font-size: 9px;
+  line-height: 1.25;
+  opacity: .55;
+}
+
+.gm-codex-gallery-actions {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 5px;
+  padding: 0 8px 9px;
+}
+
+.gm-codex-gallery-actions .compact-btn {
+  width: 100%;
+  min-width: 0;
+  min-height: 30px;
+  margin: 0;
+  padding: 5px 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 9px;
+  line-height: 1.1;
+}
+
+.gm-codex-gallery-actions .compact-btn i {
+  margin: 0;
+}
+
+.gm-codex-gallery-empty {
+  grid-column: 1 / -1;
+}
+
+.gm-codex-gallery-home-card .gm-codex-home-card-icon {
+  font-size: 16px;
+}
+
+.gm-codex-system-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 1px solid rgba(255,255,255,.09);
+  border-radius: 999px;
+  background: rgba(255,255,255,.05);
+  font-size: 9px;
+  line-height: 1.2;
+  opacity: .65;
+}
+
+.gm-codex-system-badge i { margin: 0; }
+
+@media (max-width: 900px) {
+  .gm-codex-gallery-grid {
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  }
+  .gm-codex-gallery-actions {
+    grid-template-columns: 1fr;
+  }
+}

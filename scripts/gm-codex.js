@@ -1,8 +1,10 @@
 const MODULE_ID = "gm-codex";
 const ROOT_FOLDER_NAME = "GM Codex";
 const TREE_FLAG = "treeV2";
+const MAIN_PLOT_NAME = "Trama principale";
 
 const KIND_LABELS = {
+  plot: "Trama principale",
   city: "Città",
   faction: "Fazione",
   npc: "PNG",
@@ -12,6 +14,7 @@ const KIND_LABELS = {
 };
 
 const KIND_ICONS = {
+  plot: "fa-solid fa-route",
   city: "fa-solid fa-city",
   faction: "fa-solid fa-flag",
   npc: "fa-solid fa-user",
@@ -189,6 +192,62 @@ async function createCodexEntry({ name, kind, cityId = null, factionId = null, s
   });
 }
 
+
+async function ensureMainPlotEntry() {
+  let entry = game.journal.contents.find(j => j.getFlag(MODULE_ID, "kind") === "plot");
+  if (entry) return entry;
+
+  const folder = await ensureRootFolder();
+  entry = await foundry.documents.JournalEntry.create({
+    name: MAIN_PLOT_NAME,
+    folder: folder.id,
+    ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE },
+    flags: { [MODULE_ID]: { kind: "plot", systemRoot: true } },
+    pages: [{
+      name: "Quadro generale",
+      type: "text",
+      text: {
+        content: `<h1>${MAIN_PLOT_NAME}</h1><p></p>`,
+        format: CONST.JOURNAL_ENTRY_PAGE_FORMATS?.HTML ?? 1
+      }
+    }]
+  });
+  return entry;
+}
+
+function extractImagesFromEntry(entry) {
+  const images = [];
+  const seen = new Set();
+
+  const push = (src, page, title = null) => {
+    src = String(src || "").trim();
+    if (!src) return;
+    const key = `${entry.id}|${page?.id || ""}|${src}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    images.push({
+      src,
+      title: title || page?.name || entry.name || "Immagine",
+      entryId: entry.id,
+      entryName: entry.name,
+      pageId: page?.id || null,
+      pageName: page?.name || null,
+      uuid: page?.uuid || entry.uuid || ""
+    });
+  };
+
+  for (const page of getPages(entry)) {
+    if (page.type === "image" && page.src) push(page.src, page, page.name);
+    if (page.type === "text") {
+      const wrapper = document.createElement("div");
+      wrapper.innerHTML = page.text?.content || "";
+      for (const img of wrapper.querySelectorAll("img")) {
+        push(img.getAttribute("src"), page, img.getAttribute("alt") || page.name);
+      }
+    }
+  }
+  return images;
+}
 /* -------------------------------------------------------------------------- */
 /*                                  Tree data                                 */
 /* -------------------------------------------------------------------------- */
@@ -501,7 +560,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
   constructor(options = {}) {
     super(options);
     this.selectedCityId = null;
-    this.section = "city";
+    this.section = "plot";
     this.outsideSection = "place";
     this.selectedEntryId = null;
     this.selectedTreeNodeId = null;
@@ -511,6 +570,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     this.expandedPageOutlines = new Set();
     this.selectedHeadingId = null;
     this._pendingHeadingId = null;
+    this.showGallery = false;
     this.treeWidth = Number(setting("treeWidth", 300)) || 300;
     this._dragNodeId = null;
   }
@@ -564,9 +624,21 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     return cities.find(c => c.id === this.selectedCityId) ?? cities[0] ?? null;
   }
 
+  _getMainPlot(entries = codexEntries()) {
+    return entries.find(e => e.getFlag(MODULE_ID, "kind") === "plot") ?? null;
+  }
+
+  _currentContext(entries = codexEntries(), cities = this._getCities(entries)) {
+    if (this.section === "plot") return this._getMainPlot(entries);
+    if (this.section === "city") return this._currentCity(cities);
+    return null;
+  }
+
   async _buildHTML() {
+    await ensureMainPlotEntry();
     const entries = codexEntries();
     const cities = this._getCities(entries);
+    const plot = this._getMainPlot(entries);
 
     if (this.selectedCityId && !cities.some(c => c.id === this.selectedCityId)) this.selectedCityId = null;
     if (!this.selectedCityId && cities.length) this.selectedCityId = cities[0].id;
@@ -578,6 +650,11 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       main = this._buildJournalBrowser(this.searchTerm);
     } else if (this.section === "outside") {
       main = this.searchTerm.trim() ? this._buildOutsideSearch(entries) : this._buildOutside(entries);
+    } else if (this.section === "plot" && plot) {
+      const tree = normalizeTree(plot, entries);
+      main = this.searchTerm.trim()
+        ? this._buildCitySearch(plot, entries, tree)
+        : this._buildCityWorkspace(plot, entries, tree);
     } else if (!cities.length) {
       main = this._buildWelcome();
     } else {
@@ -588,11 +665,12 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         : this._buildCityWorkspace(city, entries, tree);
     }
 
+    const context = this._currentContext(entries, cities);
     const placeholder = this.section === "journals"
       ? "Cerca nei Journal Foundry..."
       : this.section === "outside"
         ? "Cerca fuori città..."
-        : `Cerca${this._currentCity(cities) ? ` in ${this._currentCity(cities).name}` : " nel Codex"}...`;
+        : `Cerca${context ? ` in ${context.name}` : " nel Codex"}...`;
 
     return `
       <aside class="gm-codex-sidebar">
@@ -627,7 +705,14 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       : '<div class="gm-codex-empty-mini">Nessuna città</div>';
 
     return `
-      <div class="gm-codex-sidebar-head">
+      <div class="gm-codex-sidebar-head"><span>TRAMA</span></div>
+      <nav>
+        <button type="button" class="gm-codex-nav ${this.section === "plot" ? "active" : ""}" data-action="select-plot">
+          <i class="fa-solid fa-route"></i><span>Trama principale</span>
+        </button>
+      </nav>
+
+      <div class="gm-codex-sidebar-head outside-head">
         <span>CITTÀ</span>
         <button type="button" class="icon-btn" data-action="add" data-kind="city" title="Nuova città"><i class="fa-solid fa-plus"></i></button>
       </div>
@@ -678,26 +763,31 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       <div class="gm-codex-city-layout">
         <div class="gm-codex-city-header">
           <div>
-            <span class="eyebrow">CITTÀ / AREA</span>
+            <span class="eyebrow">${city.getFlag(MODULE_ID, "kind") === "plot" ? "TRAMA PRINCIPALE" : "CITTÀ / AREA"}</span>
             <h1>${escapeHTML(city.name)}</h1>
             <div class="gm-codex-city-stats">${pageCount} ${pageCount === 1 ? "pagina" : "pagine"} · ${linkedCount} ${linkedCount === 1 ? "scheda collegata" : "schede collegate"}</div>
           </div>
           <div class="gm-codex-city-actions">
-            <button type="button" class="gm-codex-primary" data-action="add-group"><i class="fa-solid fa-folder-plus"></i> Capitolo</button>
+            <button type="button" class="gm-codex-primary" data-action="add-group"><i class="fa-solid fa-folder-plus"></i> Categoria</button>
             <button type="button" class="gm-codex-primary" data-action="add-city-page" data-city-id="${city.id}"><i class="fa-solid fa-file-circle-plus"></i> Pagina</button>
             <button type="button" class="gm-codex-secondary" data-action="quick-create" data-city-id="${city.id}"><i class="fa-solid fa-plus"></i> Scheda</button>
             <button type="button" class="gm-codex-secondary" data-action="open-journal" data-id="${city.id}" title="Apri il Journal originale"><i class="fa-solid fa-pen-to-square"></i></button>
             <button type="button" class="gm-codex-secondary" data-action="share" data-id="${city.id}" title="${isShared(city) ? "Visibile al gruppo" : "Solo GM"}"><i class="fa-solid ${isShared(city) ? "fa-unlock" : "fa-lock"}"></i></button>
-            <button type="button" class="gm-codex-danger compact-btn" data-action="delete" data-id="${city.id}" title="Elimina città"><i class="fa-solid fa-trash"></i></button>
+            ${city.getFlag(MODULE_ID, "kind") === "plot" ? "" : `<button type="button" class="gm-codex-danger compact-btn" data-action="delete" data-id="${city.id}" title="Elimina città"><i class="fa-solid fa-trash"></i></button>`}
           </div>
         </div>
 
         <div class="gm-codex-city-workspace" style="--gm-codex-tree-width:${Math.round(this.treeWidth)}px">
           <aside class="gm-codex-tree-panel">
             <div class="gm-codex-tree-head">
-              <button type="button" class="gm-codex-tree-home ${!this.selectedTreeNodeId ? "active" : ""}" data-action="city-home">
-                <i class="fa-solid fa-house"></i><span>Panoramica</span>
-              </button>
+              <div class="gm-codex-tree-primary-links">
+                <button type="button" class="gm-codex-tree-home ${!this.selectedTreeNodeId && !this.showGallery ? "active" : ""}" data-action="city-home">
+                  <i class="fa-solid fa-house"></i><span>Panoramica</span>
+                </button>
+                <button type="button" class="gm-codex-tree-home ${this.showGallery ? "active" : ""}" data-action="gallery">
+                  <i class="fa-solid fa-images"></i><span>${city.getFlag(MODULE_ID, "kind") === "plot" ? "Galleria globale" : "Galleria immagini"}</span>
+                </button>
+              </div>
               <span class="gm-codex-tree-help" title="Trascina pagine e capitoli per riordinarli"><i class="fa-solid fa-arrows-up-down-left-right"></i></span>
             </div>
             <div class="gm-codex-tree">
@@ -806,6 +896,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
   }
 
   _renderSelectedCityNode(city, entries, tree) {
+    if (this.showGallery) return this._renderImageGallery(city, entries);
     if (!this.selectedTreeNodeId) return this._renderCityHome(city, entries, tree);
 
     const found = findNode(tree, this.selectedTreeNodeId);
@@ -841,6 +932,14 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
         <div class="gm-codex-mini-cards">${loose.map(node => this._renderNodeCard(city, node)).join("")}</div>
       </div>` : "";
 
+    const galleryLabel = city.getFlag(MODULE_ID, "kind") === "plot" ? "Galleria globale" : "Galleria immagini";
+    const galleryCard = `
+      <button type="button" class="gm-codex-home-card gm-codex-gallery-home-card" data-action="gallery">
+        <div class="gm-codex-home-card-icon"><i class="fa-solid fa-images"></i></div>
+        <div><strong>${galleryLabel}</strong><span>Anteprima immagini dei Journal collegati</span></div>
+        <i class="fa-solid fa-chevron-right"></i>
+      </button>`;
+
     return `
       <div class="gm-codex-reader-scroll">
         <div class="gm-codex-home-hero">
@@ -848,8 +947,67 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
           <h2>${escapeHTML(city.name)}</h2>
           <p>Apri un capitolo oppure usa l'albero a sinistra. Puoi trascinare pagine e capitoli per costruire la struttura che preferisci.</p>
         </div>
-        <div class="gm-codex-home-grid">${cards || '<div class="gm-codex-empty-list"><p>Nessun capitolo.</p></div>'}</div>
+        <div class="gm-codex-home-grid">${cards}${galleryCard}</div>
         ${looseCards}
+      </div>`;
+  }
+
+  _collectImagesForContext(root, entries) {
+    const isGlobal = root.getFlag(MODULE_ID, "kind") === "plot";
+    let docs;
+    if (isGlobal) {
+      docs = entries.filter(e => e.id !== root.id && e.getFlag(MODULE_ID, "kind") !== "plot");
+      docs.unshift(root);
+    } else {
+      docs = [root, ...entries.filter(e => e.id !== root.id && e.getFlag(MODULE_ID, "cityId") === root.id)];
+    }
+
+    const images = [];
+    const seen = new Set();
+    for (const entry of docs) {
+      for (const image of extractImagesFromEntry(entry)) {
+        const key = `${image.entryId}|${image.pageId || ""}|${image.src}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        images.push(image);
+      }
+    }
+    return images;
+  }
+
+  _renderImageGallery(root, entries) {
+    const images = this._collectImagesForContext(root, entries);
+    const global = root.getFlag(MODULE_ID, "kind") === "plot";
+    const cards = images.length ? images.map(image => `
+      <article class="gm-codex-gallery-card">
+        <button type="button" class="gm-codex-gallery-thumb" data-action="open-image" data-src="${escapeHTML(image.src)}" data-title="${escapeHTML(image.title)}" data-uuid="${escapeHTML(image.uuid || "")}">
+          <img src="${escapeHTML(image.src)}" alt="${escapeHTML(image.title)}" loading="lazy">
+        </button>
+        <div class="gm-codex-gallery-meta">
+          <strong>${escapeHTML(image.title)}</strong>
+          <span>${escapeHTML(image.entryName)}${image.pageName ? ` · ${escapeHTML(image.pageName)}` : ""}</span>
+        </div>
+        <div class="gm-codex-gallery-actions">
+          <button type="button" class="gm-codex-secondary compact-btn" data-action="open-image" data-src="${escapeHTML(image.src)}" data-title="${escapeHTML(image.title)}" data-uuid="${escapeHTML(image.uuid || "")}" title="Apri solo per il GM"><i class="fa-solid fa-eye"></i> Apri</button>
+          <button type="button" class="gm-codex-secondary compact-btn" data-action="share-image" data-src="${escapeHTML(image.src)}" data-title="${escapeHTML(image.title)}" data-uuid="${escapeHTML(image.uuid || "")}" title="Mostra ai giocatori"><i class="fa-solid fa-display"></i> Mostra</button>
+          <button type="button" class="gm-codex-secondary compact-btn" data-action="open-image-source" data-entry-id="${image.entryId}" ${image.pageId ? `data-page-id="${image.pageId}"` : ""} title="Apri il Journal sorgente"><i class="fa-solid fa-book-open"></i> Sorgente</button>
+        </div>
+      </article>`).join("") : `
+      <div class="gm-codex-empty-list gm-codex-gallery-empty">
+        <i class="fa-solid fa-images"></i>
+        <p>Nessuna immagine trovata nei Journal ${global ? "del Codex" : "collegati a questa area"}.</p>
+      </div>`;
+
+    return `
+      <div class="gm-codex-reader-scroll">
+        <div class="gm-codex-reader-head">
+          <div>
+            <span class="eyebrow">${global ? "INTERO CODEX" : escapeHTML(root.name)}</span>
+            <h2><i class="fa-solid fa-images"></i> ${global ? "Galleria globale" : "Galleria immagini"}</h2>
+            <p>${images.length} ${images.length === 1 ? "immagine" : "immagini"} trovate automaticamente nei Journal.</p>
+          </div>
+        </div>
+        <div class="gm-codex-gallery-grid">${cards}</div>
       </div>`;
   }
 
@@ -866,8 +1024,9 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
             <p>${treeLeafCount(group)} ${treeLeafCount(group) === 1 ? "voce" : "voci"} nel capitolo</p>
           </div>
           <div class="gm-codex-reader-actions">
-            <button type="button" class="gm-codex-secondary" data-action="add-group" data-parent-id="${group.id}"><i class="fa-solid fa-folder-plus"></i> Sottocapitolo</button>
+            <button type="button" class="gm-codex-secondary" data-action="add-group" data-parent-id="${group.id}"><i class="fa-solid fa-folder-plus"></i> Sottocategoria</button>
             <button type="button" class="gm-codex-secondary" data-action="add-city-page" data-city-id="${city.id}" data-parent-id="${group.id}"><i class="fa-solid fa-file-circle-plus"></i> Pagina</button>
+            <button type="button" class="gm-codex-secondary" data-action="quick-create" data-city-id="${city.id}" data-parent-id="${group.id}"><i class="fa-solid fa-plus"></i> Scheda</button>
             <button type="button" class="gm-codex-secondary" data-action="rename-group" data-id="${group.id}"><i class="fa-solid fa-pen"></i></button>
             <button type="button" class="gm-codex-danger compact-btn" data-action="delete-group" data-id="${group.id}" title="Elimina il capitolo mantenendo le pagine"><i class="fa-solid fa-trash"></i></button>
           </div>
@@ -1148,10 +1307,12 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
           </div>
           <div class="gm-codex-journal-actions">
             <button type="button" class="gm-codex-secondary compact-btn" data-action="open-journal" data-id="${entry.id}" title="Apri Journal"><i class="fa-solid fa-arrow-up-right-from-square"></i></button>
-            ${managed
-              ? `<button type="button" class="gm-codex-secondary compact-btn" data-action="unimport-journal" data-id="${entry.id}"><i class="fa-solid fa-link-slash"></i> Rimuovi dal Codex</button>`
-              : `<button type="button" class="gm-codex-primary compact-btn" data-action="import-journal" data-id="${entry.id}"><i class="fa-solid fa-file-import"></i> Aggiungi al Codex</button>`}
-            <button type="button" class="gm-codex-danger compact-btn" data-action="delete-journal" data-id="${entry.id}" title="Elimina definitivamente"><i class="fa-solid fa-trash"></i></button>
+            ${kind === "plot"
+              ? `<span class="gm-codex-system-badge"><i class="fa-solid fa-route"></i> Radice del Codex</span>`
+              : managed
+                ? `<button type="button" class="gm-codex-secondary compact-btn" data-action="unimport-journal" data-id="${entry.id}"><i class="fa-solid fa-link-slash"></i> Rimuovi dal Codex</button>`
+                : `<button type="button" class="gm-codex-primary compact-btn" data-action="import-journal" data-id="${entry.id}"><i class="fa-solid fa-file-import"></i> Aggiungi al Codex</button>`}
+            ${kind === "plot" ? "" : `<button type="button" class="gm-codex-danger compact-btn" data-action="delete-journal" data-id="${entry.id}" title="Elimina definitivamente"><i class="fa-solid fa-trash"></i></button>`}
           </div>
         </article>`;
     }).join("") : '<div class="gm-codex-empty-list"><i class="fa-solid fa-book"></i><p>Nessun Journal trovato.</p></div>';
@@ -1203,7 +1364,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
   _bindDragDrop() {
     const root = this.element;
-    if (!root || this.section !== "city" || this.searchTerm) return;
+    if (!root || !["city", "plot"].includes(this.section) || this.searchTerm) return;
 
     root.querySelectorAll("[data-tree-node]").forEach(row => {
       row.addEventListener("dragstart", event => {
@@ -1292,9 +1453,19 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     const action = target.dataset.action;
 
     switch (action) {
+      case "select-plot":
+        this.section = "plot";
+        this.selectedTreeNodeId = null;
+        this.selectedEntryPageId = null;
+        this.selectedHeadingId = null;
+        this.showGallery = false;
+        this.searchTerm = "";
+        return this.render({ force: true });
+
       case "select-city":
         this.selectedCityId = target.dataset.id;
         this.section = "city";
+        this.showGallery = false;
         this.selectedTreeNodeId = null;
         this.selectedEntryPageId = null;
         this.selectedHeadingId = null;
@@ -1303,10 +1474,18 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
       case "city-home":
         this.selectedTreeNodeId = null;
+        this.showGallery = false;
         this.selectedHeadingId = null;
         return this.render({ force: true });
 
+      case "gallery":
+        this.selectedTreeNodeId = null;
+        this.selectedHeadingId = null;
+        this.showGallery = true;
+        return this.render({ force: true });
+
       case "select-tree-node":
+        this.showGallery = false;
         this.selectedTreeNodeId = target.dataset.id;
         this.selectedEntryPageId = null;
         this.selectedHeadingId = null;
@@ -1367,15 +1546,17 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       }
 
       case "quick-create":
-        return this._promptQuickCreate(target.dataset.cityId);
+        return this._promptQuickCreate(target.dataset.cityId, target.dataset.parentId || null);
 
       case "journals":
+        this.showGallery = false;
         this.section = "journals";
         this.selectedEntryId = null;
         this.searchTerm = "";
         return this.render({ force: true });
 
       case "outside":
+        this.showGallery = false;
         this.section = "outside";
         this.outsideSection = target.dataset.kind;
         this.selectedEntryId = null;
@@ -1418,6 +1599,12 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       case "open-image":
         return this._openImage(target.dataset.src, target.dataset.title, target.dataset.uuid);
 
+      case "share-image":
+        return this._shareImage(target.dataset.src, target.dataset.title, target.dataset.uuid);
+
+      case "open-image-source":
+        return this._openImageSource(target.dataset.entryId, target.dataset.pageId || null);
+
       case "share":
         return this._toggleShare(target.dataset.id);
 
@@ -1438,7 +1625,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
 
   async _moveNode(sourceId, targetId, mode) {
     if (!sourceId) return;
-    const city = this._currentCity();
+    const city = this._currentContext();
     if (!city) return;
     const tree = normalizeTree(city, codexEntries());
 
@@ -1457,13 +1644,13 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async _promptAddGroup(parentId = null) {
-    const city = this._currentCity();
+    const city = this._currentContext();
     if (!city) return;
 
     let title;
     try {
       title = await foundry.applications.api.DialogV2.prompt({
-        window: { title: parentId ? "Nuovo sottocapitolo" : "Nuovo capitolo" },
+        window: { title: parentId ? "Nuova sottocategoria" : "Nuova categoria" },
         content: `<div class="gm-codex-dialog"><label class="gm-codex-dialog-field"><span>Nome</span><input name="title" type="text" autofocus required placeholder="Es. Storia, Segreti, Eventi..."></label></div>`,
         ok: { label: "Crea", icon: "fa-solid fa-folder-plus", callback: (_event, button) => button.form.elements.title.value.trim() },
         rejectClose: false,
@@ -1489,7 +1676,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async _promptRenameGroup(groupId) {
-    const city = this._currentCity();
+    const city = this._currentContext();
     if (!city) return;
     const tree = normalizeTree(city, codexEntries());
     const group = findNode(tree, groupId)?.node;
@@ -1498,7 +1685,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     let title;
     try {
       title = await foundry.applications.api.DialogV2.prompt({
-        window: { title: "Rinomina capitolo" },
+        window: { title: "Rinomina categoria" },
         content: `<div class="gm-codex-dialog"><label class="gm-codex-dialog-field"><span>Nome</span><input name="title" type="text" value="${escapeHTML(group.title)}" autofocus required></label></div>`,
         ok: { label: "Salva", icon: "fa-solid fa-floppy-disk", callback: (_event, button) => button.form.elements.title.value.trim() },
         rejectClose: false,
@@ -1514,7 +1701,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async _deleteGroup(groupId) {
-    const city = this._currentCity();
+    const city = this._currentContext();
     if (!city) return;
     const tree = normalizeTree(city, codexEntries());
     const info = findContainer(tree, groupId);
@@ -1522,9 +1709,9 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     const group = info.node;
 
     const confirmed = await foundry.applications.api.DialogV2.confirm({
-      window: { title: `Eliminare il capitolo “${group.title}”?` },
-      content: `<p>Il capitolo verrà rimosso, ma <strong>le pagine e le schede al suo interno non verranno eliminate</strong>: saranno spostate al livello superiore.</p>`,
-      yes: { label: "Elimina capitolo", icon: "fa-solid fa-trash" },
+      window: { title: `Eliminare la categoria “${group.title}”?` },
+      content: `<p>La categoria verrà rimossa, ma <strong>le pagine e le schede al suo interno non verranno eliminate</strong>: saranno spostate al livello superiore.</p>`,
+      yes: { label: "Elimina categoria", icon: "fa-solid fa-trash" },
       no: { label: "Annulla" },
       rejectClose: false,
       modal: true
@@ -1616,7 +1803,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     this.render({ force: true });
   }
 
-  async _promptQuickCreate(cityId) {
+  async _promptQuickCreate(cityId, parentId = null) {
     const city = game.journal.get(cityId);
     if (!city) return;
 
@@ -1630,6 +1817,8 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
               <option value="npc">PNG</option>
               <option value="faction">Fazione</option>
               <option value="quest">Missione</option>
+              <option value="place">Luogo</option>
+              <option value="encounter">Incontro</option>
             </select>
           </label>
         </div>`,
@@ -1639,11 +1828,13 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       });
     } catch { return; }
 
-    if (kind) return this._promptAdd(kind, city.id);
+    if (kind) return this._promptAdd(kind, city.id, parentId);
   }
 
   async _promptCreateJournal() {
     const cities = this._getCities();
+    const plot = await ensureMainPlotEntry();
+    const contexts = [plot, ...cities];
     const factions = codexEntries()
       .filter(e => e.getFlag(MODULE_ID, "kind") === "faction")
       .sort((a, b) => a.name.localeCompare(b.name, "it"));
@@ -1665,8 +1856,8 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
               <option value="encounter">Incontro</option>
             </select>
           </label>
-          <label class="gm-codex-dialog-field"><span>Città / Area di appartenenza <small>(quando pertinente)</small></span>
-            <select name="cityId"><option value="">— Nessuna / fuori città —</option>${cities.map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join("")}</select>
+          <label class="gm-codex-dialog-field"><span>Contesto / area di appartenenza <small>(quando pertinente)</small></span>
+            <select name="cityId"><option value="">— Nessuna / fuori città —</option>${contexts.map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join("")}</select>
           </label>
           <label class="gm-codex-dialog-field"><span>Fazione <small>(solo PNG, opzionale)</small></span>
             <select name="factionId"><option value="">— Nessuna —</option>${factions.map(f => `<option value="${f.id}">${escapeHTML(f.name)}</option>`).join("")}</select>
@@ -1695,13 +1886,13 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     if (!result?.name) return ui.notifications.warn("Inserisci un nome.");
 
     if (["npc", "faction", "quest"].includes(result.kind) && !result.cityId) {
-      return ui.notifications.warn("Per PNG, Fazioni e Quest scegli una città o area di appartenenza.");
+      return ui.notifications.warn("Per PNG, Fazioni e Quest scegli Trama principale oppure una città/area di appartenenza.");
     }
 
     if (result.kind === "npc" && result.factionId) {
       const faction = game.journal.get(result.factionId);
       if (faction?.getFlag(MODULE_ID, "cityId") !== result.cityId) {
-        return ui.notifications.warn("La fazione scelta appartiene a una città diversa.");
+        return ui.notifications.warn("La fazione scelta appartiene a un contesto diverso.");
       }
     }
 
@@ -1733,9 +1924,10 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       this.selectedTreeNodeId = null;
       this.section = "city";
     } else if (result.cityId && result.kind) {
-      this.selectedCityId = result.cityId;
+      const parent = game.journal.get(result.cityId);
       this.selectedTreeNodeId = `entry-${entry.id}`;
-      this.section = "city";
+      this.section = parent?.getFlag(MODULE_ID, "kind") === "plot" ? "plot" : "city";
+      if (this.section === "city") this.selectedCityId = result.cityId;
     } else if (["place", "encounter"].includes(result.kind)) {
       this.section = "outside";
       this.outsideSection = result.kind;
@@ -1753,6 +1945,8 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     if (!entry || entry.getFlag(MODULE_ID, "kind")) return;
 
     const cities = this._getCities();
+    const plot = await ensureMainPlotEntry();
+    const contexts = [plot, ...cities];
     const factions = codexEntries().filter(e => e.getFlag(MODULE_ID, "kind") === "faction").sort((a, b) => a.name.localeCompare(b.name, "it"));
 
     let result;
@@ -1770,7 +1964,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
             <option value="encounter">Incontro fuori città</option>
           </select></label>
           <label class="gm-codex-dialog-field"><span>Città / Area collegata <small>(quando pertinente)</small></span>
-            <select name="cityId"><option value="">— Nessuna —</option>${cities.map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join("")}</select>
+            <select name="cityId"><option value="">— Nessuna / fuori città —</option>${contexts.map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join("")}</select>
           </label>
           <label class="gm-codex-dialog-field"><span>Fazione <small>(solo PNG, opzionale)</small></span>
             <select name="factionId"><option value="">— Nessuna —</option>${factions.map(f => `<option value="${f.id}">${escapeHTML(f.name)}</option>`).join("")}</select>
@@ -1806,6 +2000,12 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       this.selectedCityId = entry.id;
       this.selectedTreeNodeId = null;
       this.section = "city";
+      this.searchTerm = "";
+    } else if (result.cityId) {
+      const parent = game.journal.get(result.cityId);
+      this.selectedTreeNodeId = `entry-${entry.id}`;
+      this.section = parent?.getFlag(MODULE_ID, "kind") === "plot" ? "plot" : "city";
+      if (this.section === "city") this.selectedCityId = result.cityId;
       this.searchTerm = "";
     }
     this.render({ force: true });
@@ -1929,6 +2129,24 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     await popout.render(true);
   }
 
+  _shareImage(src, title = "Immagine", uuid = "") {
+    if (!src) return;
+    const ImagePopout = foundry.applications.apps.ImagePopout;
+    const popout = new ImagePopout({
+      src,
+      uuid: uuid || undefined,
+      window: { title: title || "Immagine" }
+    });
+    popout.shareImage();
+    ui.notifications.info(`Immagine “${title || "Immagine"}” mostrata ai giocatori.`);
+  }
+
+  _openImageSource(entryId, pageId = null) {
+    const entry = game.journal.get(entryId);
+    if (!entry) return;
+    return entry.sheet?.render(true);
+  }
+
   async _toggleShare(id) {
     const entry = game.journal.get(id);
     if (!entry) return;
@@ -1941,7 +2159,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     this.render({ force: true });
   }
 
-  async _promptAdd(kind, cityId) {
+  async _promptAdd(kind, cityId, parentId = null) {
     const factions = kind === "npc" && cityId
       ? codexEntries().filter(e => e.getFlag(MODULE_ID, "kind") === "faction" && e.getFlag(MODULE_ID, "cityId") === cityId)
       : [];
@@ -1984,10 +2202,28 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       status: result.status
     });
 
+    if (cityId && parentId) {
+      const parentContext = game.journal.get(cityId);
+      if (parentContext) {
+        const tree = normalizeTree(parentContext, codexEntries());
+        const entryNode = findNode(tree, `entry-${created.id}`)?.node;
+        if (entryNode) {
+          const moved = moveTreeNode(tree, entryNode.id, parentId, "inside");
+          await this._saveTree(parentContext, moved);
+        }
+      }
+    }
+
     if (kind === "city") {
       this.selectedCityId = created.id;
       this.selectedTreeNodeId = null;
       this.section = "city";
+    } else if (cityId) {
+      const parent = game.journal.get(cityId);
+      this.selectedTreeNodeId = `entry-${created.id}`;
+      this.selectedEntryId = null;
+      this.section = parent?.getFlag(MODULE_ID, "kind") === "plot" ? "plot" : "city";
+      if (this.section === "city") this.selectedCityId = cityId;
     } else if (kind === "place" || kind === "encounter") {
       this.section = "outside";
       this.outsideSection = kind;
@@ -2022,11 +2258,21 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
   }
 
   openCity(cityId) {
+    this.showGallery = false;
     this.selectedCityId = cityId;
     this.selectedTreeNodeId = null;
     this.selectedEntryId = null;
     this.searchTerm = "";
     this.section = "city";
+    return this.render({ force: true });
+  }
+
+  openMainPlot() {
+    this.showGallery = false;
+    this.selectedTreeNodeId = null;
+    this.selectedEntryId = null;
+    this.searchTerm = "";
+    this.section = "plot";
     return this.render({ force: true });
   }
 
@@ -2093,6 +2339,7 @@ function openCodex() {
 Hooks.once("ready", () => {
   game.modules.get(MODULE_ID).api = {
     open: openCodex,
+    openPlot: () => getCodexApp().openMainPlot(),
     createEntry: createCodexEntry
   };
   console.log(`${MODULE_ID} | Ready`);
@@ -2114,6 +2361,7 @@ class GMCodexSidebarTab extends foundry.applications.sidebar.AbstractSidebarTab 
   get tabName() { return "gmcodex"; }
 
   async _renderHTML(_context, _options) {
+    await ensureMainPlotEntry();
     const root = document.createElement("section");
     root.className = "gm-codex-sidebar-launcher";
     const cities = codexEntries()
@@ -2126,6 +2374,9 @@ class GMCodexSidebarTab extends foundry.applications.sidebar.AbstractSidebarTab 
         <div><strong>GM Codex</strong><span>Manuale del GM</span></div>
       </div>
       <button type="button" class="gm-codex-sidebar-open" data-action="open-codex"><i class="fa-solid fa-up-right-from-square"></i> Apri GM Codex</button>
+
+      <div class="gm-codex-sidebar-launcher-label">TRAMA</div>
+      <button type="button" class="gm-codex-sidebar-archive" data-action="open-plot"><i class="fa-solid fa-route"></i> Trama principale</button>
 
       <div class="gm-codex-sidebar-launcher-label">CITTÀ / AREE</div>
       <div class="gm-codex-sidebar-launcher-cities">
@@ -2149,6 +2400,7 @@ class GMCodexSidebarTab extends foundry.applications.sidebar.AbstractSidebarTab 
     this.element?.querySelectorAll("[data-action]").forEach(button => button.addEventListener("click", event => {
       const target = event.currentTarget;
       if (target.dataset.action === "open-codex") return openCodex();
+      if (target.dataset.action === "open-plot") return getCodexApp().openMainPlot();
       if (target.dataset.action === "open-city") return getCodexApp().openCity(target.dataset.id);
       if (target.dataset.action === "open-journals") return getCodexApp().openJournalManager();
     }));
