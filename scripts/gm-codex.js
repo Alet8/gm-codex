@@ -242,7 +242,85 @@ function groupForKind(kind) {
   if (kind === "faction") return "Fazioni";
   if (kind === "npc") return "Personaggi";
   if (kind === "quest") return "Missioni";
+  if (kind === "place") return "Luoghi";
+  if (kind === "encounter") return "Incontri";
   return "Ambientazione";
+}
+
+function setting(key, fallback = null) {
+  try {
+    const value = game.settings.get(MODULE_ID, key);
+    return value ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function refreshCodexFromSettings() {
+  if (!codexApp) return;
+  codexApp.treeWidth = Number(setting("treeWidth", 300)) || 300;
+  if (codexApp.rendered) {
+    codexApp.setPosition?.({
+      width: Number(setting("windowWidth", 1180)) || 1180,
+      height: Number(setting("windowHeight", 780)) || 780
+    });
+    codexApp.render({ force: true });
+  }
+}
+
+function registerCodexSettings() {
+  game.settings.register(MODULE_ID, "windowWidth", {
+    name: "Larghezza predefinita finestra",
+    hint: "Larghezza con cui GM Codex viene aperto. La finestra resta comunque ridimensionabile manualmente.",
+    scope: "user",
+    config: true,
+    type: Number,
+    range: { min: 800, max: 1800, step: 20 },
+    default: 1180,
+    onChange: refreshCodexFromSettings
+  });
+
+  game.settings.register(MODULE_ID, "windowHeight", {
+    name: "Altezza predefinita finestra",
+    hint: "Altezza con cui GM Codex viene aperto. La finestra resta comunque ridimensionabile manualmente.",
+    scope: "user",
+    config: true,
+    type: Number,
+    range: { min: 520, max: 1200, step: 20 },
+    default: 780,
+    onChange: refreshCodexFromSettings
+  });
+
+  game.settings.register(MODULE_ID, "treeWidth", {
+    name: "Larghezza predefinita albero",
+    hint: "Larghezza iniziale del pannello ad albero. Puoi comunque trascinare il separatore direttamente nel Codex.",
+    scope: "user",
+    config: true,
+    type: Number,
+    range: { min: 220, max: 520, step: 10 },
+    default: 300,
+    onChange: refreshCodexFromSettings
+  });
+
+  game.settings.register(MODULE_ID, "showOutside", {
+    name: "Mostra sezione Fuori città",
+    hint: "Mostra nel menu principale le categorie Luoghi e Incontri fuori città.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: refreshCodexFromSettings
+  });
+
+  game.settings.register(MODULE_ID, "showJournalArchive", {
+    name: "Mostra Archivio Journal Foundry",
+    hint: "Mostra nel GM Codex il collegamento all’archivio completo dei Journal di Foundry.",
+    scope: "world",
+    config: true,
+    type: Boolean,
+    default: true,
+    onChange: refreshCodexFromSettings
+  });
 }
 
 function walkTree(nodes, callback, parent = null, depth = 0) {
@@ -433,7 +511,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
     this.expandedPageOutlines = new Set();
     this.selectedHeadingId = null;
     this._pendingHeadingId = null;
-    this.treeWidth = 300;
+    this.treeWidth = Number(setting("treeWidth", 300)) || 300;
     this._dragNodeId = null;
   }
 
@@ -532,9 +610,9 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
             <input type="search" data-action="search" value="${escapeHTML(this.searchTerm)}" placeholder="${escapeHTML(placeholder)}">
             ${this.searchTerm ? '<button type="button" class="icon-btn" data-action="clear-search" title="Pulisci ricerca"><i class="fa-solid fa-xmark"></i></button>' : ""}
           </div>
-          <button type="button" class="gm-codex-ghost" data-action="journals" title="Gestisci i Journal di Foundry">
+          ${setting("showJournalArchive", true) ? `<button type="button" class="gm-codex-ghost" data-action="journals" title="Gestisci i Journal di Foundry">
             <i class="fa-solid fa-book"></i> Journal Foundry
-          </button>
+          </button>` : ""}
         </header>
         <section class="gm-codex-content">${main}</section>
       </main>`;
@@ -555,22 +633,24 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
       </div>
       <nav class="gm-codex-city-list">${cityButtons}</nav>
 
+      ${setting("showOutside", true) ? `
       <div class="gm-codex-sidebar-head outside-head"><span>FUORI CITTÀ</span></div>
-      <nav>
+      <nav class="gm-codex-outside-nav">
         <button type="button" class="gm-codex-nav ${this.section === "outside" && this.outsideSection === "place" ? "active" : ""}" data-action="outside" data-kind="place">
           <i class="fa-solid fa-location-dot"></i><span>Luoghi</span>
         </button>
         <button type="button" class="gm-codex-nav ${this.section === "outside" && this.outsideSection === "encounter" ? "active" : ""}" data-action="outside" data-kind="encounter">
           <i class="fa-solid fa-shield-halved"></i><span>Incontri</span>
         </button>
-      </nav>
+      </nav>` : ""}
 
+      ${setting("showJournalArchive", true) ? `
       <div class="gm-codex-sidebar-head outside-head"><span>ARCHIVIO</span></div>
       <nav>
         <button type="button" class="gm-codex-nav ${this.section === "journals" ? "active" : ""}" data-action="journals">
           <i class="fa-solid fa-book"></i><span>Journal Foundry</span>
         </button>
-      </nav>`;
+      </nav>` : ""}`;
   }
 
   _buildWelcome() {
@@ -1084,7 +1164,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
             <h1>Journal Foundry</h1>
             <p class="gm-codex-section-subtitle">Il Codex usa i Journal esistenti senza duplicarli. Puoi importarli, crearne di nuovi, aprirli o eliminarli.</p>
           </div>
-          <button type="button" class="gm-codex-primary" data-action="create-journal"><i class="fa-solid fa-plus"></i> Nuovo Journal</button>
+          <button type="button" class="gm-codex-primary" data-action="create-journal"><i class="fa-solid fa-plus"></i> Nuovo elemento</button>
         </div>
         <div class="gm-codex-list-toolbar"><span>${journals.length} Journal</span></div>
         <div class="gm-codex-journal-list">${rows}</div>
@@ -1563,32 +1643,108 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
   }
 
   async _promptCreateJournal() {
-    let name;
+    const cities = this._getCities();
+    const factions = codexEntries()
+      .filter(e => e.getFlag(MODULE_ID, "kind") === "faction")
+      .sort((a, b) => a.name.localeCompare(b.name, "it"));
+
+    let result;
     try {
-      name = await foundry.applications.api.DialogV2.prompt({
-        window: { title: "Nuovo Journal Foundry" },
+      result = await foundry.applications.api.DialogV2.prompt({
+        window: { title: "Nuovo elemento GM Codex" },
         content: `<div class="gm-codex-dialog">
           <label class="gm-codex-dialog-field"><span>Nome</span><input name="name" type="text" autofocus required></label>
-          <p class="gm-codex-dialog-hint">Il Journal viene creato normalmente in Foundry. Potrai poi aggiungerlo al Codex.</p>
+          <label class="gm-codex-dialog-field"><span>Categoria</span>
+            <select name="kind">
+              <option value="">Journal libero</option>
+              <option value="city">Città / Area</option>
+              <option value="npc">PNG</option>
+              <option value="faction">Fazione</option>
+              <option value="quest">Quest / Missione</option>
+              <option value="place">Luogo</option>
+              <option value="encounter">Incontro</option>
+            </select>
+          </label>
+          <label class="gm-codex-dialog-field"><span>Città / Area di appartenenza <small>(quando pertinente)</small></span>
+            <select name="cityId"><option value="">— Nessuna / fuori città —</option>${cities.map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join("")}</select>
+          </label>
+          <label class="gm-codex-dialog-field"><span>Fazione <small>(solo PNG, opzionale)</small></span>
+            <select name="factionId"><option value="">— Nessuna —</option>${factions.map(f => `<option value="${f.id}">${escapeHTML(f.name)}</option>`).join("")}</select>
+          </label>
+          <label class="gm-codex-dialog-field"><span>Stato <small>(solo Quest / Missione)</small></span>
+            <select name="status">${Object.entries(QUEST_STATUSES).map(([value, label]) => `<option value="${value}">${label}</option>`).join("")}</select>
+          </label>
+          <p class="gm-codex-dialog-hint">Se scegli una categoria, il Journal viene creato già classificato nel Codex. Un Journal libero resta disponibile soltanto nell’Archivio Journal Foundry finché non decidi di importarlo.</p>
         </div>`,
-        ok: { label: "Crea", icon: "fa-solid fa-plus", callback: (_event, button) => button.form.elements.name.value.trim() },
+        ok: {
+          label: "Crea",
+          icon: "fa-solid fa-plus",
+          callback: (_event, button) => ({
+            name: button.form.elements.name.value.trim(),
+            kind: button.form.elements.kind.value || null,
+            cityId: button.form.elements.cityId.value || null,
+            factionId: button.form.elements.factionId.value || null,
+            status: button.form.elements.status.value || null
+          })
+        },
         rejectClose: false,
         modal: true
       });
     } catch { return; }
 
-    if (!name) return;
-    const entry = await foundry.documents.JournalEntry.create({
-      name,
-      ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE },
-      pages: [{
-        name: "Pagina 1",
-        type: "text",
-        text: { content: `<h1>${escapeHTML(name)}</h1><p></p>`, format: CONST.JOURNAL_ENTRY_PAGE_FORMATS?.HTML ?? 1 }
-      }]
-    });
-    ui.notifications.info(`Journal “${name}” creato.`);
-    entry.sheet?.render(true);
+    if (!result?.name) return ui.notifications.warn("Inserisci un nome.");
+
+    if (["npc", "faction", "quest"].includes(result.kind) && !result.cityId) {
+      return ui.notifications.warn("Per PNG, Fazioni e Quest scegli una città o area di appartenenza.");
+    }
+
+    if (result.kind === "npc" && result.factionId) {
+      const faction = game.journal.get(result.factionId);
+      if (faction?.getFlag(MODULE_ID, "cityId") !== result.cityId) {
+        return ui.notifications.warn("La fazione scelta appartiene a una città diversa.");
+      }
+    }
+
+    let entry;
+    if (result.kind) {
+      entry = await createCodexEntry({
+        name: result.name,
+        kind: result.kind,
+        cityId: result.kind === "city" ? null : result.cityId,
+        factionId: result.kind === "npc" ? result.factionId : null,
+        status: result.kind === "quest" ? (result.status || "notStarted") : null
+      });
+    } else {
+      entry = await foundry.documents.JournalEntry.create({
+        name: result.name,
+        ownership: { default: CONST.DOCUMENT_OWNERSHIP_LEVELS.NONE },
+        pages: [{
+          name: "Pagina 1",
+          type: "text",
+          text: { content: `<h1>${escapeHTML(result.name)}</h1><p></p>`, format: CONST.JOURNAL_ENTRY_PAGE_FORMATS?.HTML ?? 1 }
+        }]
+      });
+    }
+
+    ui.notifications.info(`“${result.name}” creato${result.kind ? ` come ${KIND_LABELS[result.kind] ?? result.kind}` : " come Journal libero"}.`);
+
+    if (result.kind === "city") {
+      this.selectedCityId = entry.id;
+      this.selectedTreeNodeId = null;
+      this.section = "city";
+    } else if (result.cityId && result.kind) {
+      this.selectedCityId = result.cityId;
+      this.selectedTreeNodeId = `entry-${entry.id}`;
+      this.section = "city";
+    } else if (["place", "encounter"].includes(result.kind)) {
+      this.section = "outside";
+      this.outsideSection = result.kind;
+      this.selectedEntryId = entry.id;
+    } else if (!result.kind) {
+      this.section = "journals";
+      entry.sheet?.render(true);
+    }
+
     this.render({ force: true });
   }
 
@@ -1613,7 +1769,7 @@ class GMCodexApp extends foundry.applications.api.ApplicationV2 {
             <option value="place">Luogo fuori città</option>
             <option value="encounter">Incontro fuori città</option>
           </select></label>
-          <label class="gm-codex-dialog-field"><span>Città collegata <small>(Fazione / PNG / Missione)</small></span>
+          <label class="gm-codex-dialog-field"><span>Città / Area collegata <small>(quando pertinente)</small></span>
             <select name="cityId"><option value="">— Nessuna —</option>${cities.map(c => `<option value="${c.id}">${escapeHTML(c.name)}</option>`).join("")}</select>
           </label>
           <label class="gm-codex-dialog-field"><span>Fazione <small>(solo PNG, opzionale)</small></span>
@@ -1925,7 +2081,13 @@ function getCodexApp() {
 
 function openCodex() {
   if (!game.user.isGM) return ui.notifications.warn("GM Codex è disponibile al Game Master.");
-  return getCodexApp().render({ force: true });
+  const app = getCodexApp();
+  app.treeWidth = Number(setting("treeWidth", 300)) || 300;
+  app.setPosition?.({
+    width: Number(setting("windowWidth", 1180)) || 1180,
+    height: Number(setting("windowHeight", 780)) || 780
+  });
+  return app.render({ force: true });
 }
 
 Hooks.once("ready", () => {
@@ -1972,8 +2134,8 @@ class GMCodexSidebarTab extends foundry.applications.sidebar.AbstractSidebarTab 
           : "<p>Nessuna città nel Codex.</p>"}
       </div>
 
-      <div class="gm-codex-sidebar-launcher-label">ARCHIVIO</div>
-      <button type="button" class="gm-codex-sidebar-archive" data-action="open-journals"><i class="fa-solid fa-book"></i> Journal Foundry</button>`;
+      ${setting("showJournalArchive", true) ? `<div class="gm-codex-sidebar-launcher-label">ARCHIVIO</div>
+      <button type="button" class="gm-codex-sidebar-archive" data-action="open-journals"><i class="fa-solid fa-book"></i> Journal Foundry</button>` : ""}`;
 
     return root;
   }
@@ -1994,6 +2156,8 @@ class GMCodexSidebarTab extends foundry.applications.sidebar.AbstractSidebarTab 
 }
 
 Hooks.once("init", () => {
+  registerCodexSettings();
+
   CONFIG.ui.gmcodex = GMCodexSidebarTab;
   CONFIG.ui.sidebar.TABS.gmcodex = {
     icon: "fa-solid fa-book-open",

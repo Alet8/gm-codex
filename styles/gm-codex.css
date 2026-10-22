@@ -1214,3 +1214,45 @@
     grid-template-columns: minmax(210px, 38%) 6px minmax(0, 1fr);
   }
 }
+
+
+/* v0.5.4 - allineamenti Fuori città e supporto Configure Settings */
+.gm-codex-outside-nav .gm-codex-nav {
+  min-height: 38px !important;
+  height: auto !important;
+  display: grid;
+  grid-template-columns: 20px minmax(0, 1fr);
+  align-items: center;
+  gap: 9px;
+  padding: 8px 10px;
+  line-height: 1.2;
+}
+
+.gm-codex-outside-nav .gm-codex-nav > i {
+  width: 20px;
+  margin: 0;
+  line-height: 1;
+  text-align: center;
+  align-self: center;
+}
+
+.gm-codex-outside-nav .gm-codex-nav > span {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  min-height: 22px;
+  line-height: 1.2;
+}
+
+/* Mantiene sempre la colonna del separatore anche quando la finestra viene ridimensionata. */
+@media (max-width: 950px) {
+  .gm-codex-city-workspace {
+    grid-template-columns: minmax(220px, var(--gm-codex-tree-width, 300px)) 7px minmax(0, 1fr) !important;
+  }
+}
+
+@media (max-width: 760px) {
+  .gm-codex-city-workspace {
+    grid-template-columns: minmax(210px, var(--gm-codex-tree-width, 260px)) 7px minmax(0, 1fr) !important;
+  }
+}
