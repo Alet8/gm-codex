@@ -2418,6 +2418,15 @@ Hooks.once("init", () => {
   };
 });
 
+function refreshCodexSidebarTab() {
+  // Aggiorna soltanto la tab di GM Codex. Ridisegnare l'intera sidebar di
+  // Foundry forza anche il Chat Log e le tab aggiunte da altri moduli
+  // (per esempio Damage Log) a renderizzarsi di nuovo, con il rischio di
+  // duplicare i loro controlli.
+  const tab = globalThis.ui?.gmcodex;
+  if (tab?.rendered) tab.render({ force: true });
+}
+
 for (const hook of [
   "createJournalEntry",
   "updateJournalEntry",
@@ -2427,7 +2436,7 @@ for (const hook of [
   "deleteJournalEntryPage"
 ]) {
   Hooks.on(hook, () => {
-    if (codexApp?.rendered) codexApp.render();
-    if (ui.sidebar?.rendered) ui.sidebar.render();
+    if (codexApp?.rendered) codexApp.render({ force: true });
+    refreshCodexSidebarTab();
   });
 }
